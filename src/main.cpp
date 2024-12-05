@@ -54,7 +54,7 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     disconnected = true;
     break;
   case WStype_CONNECTED:
-    if (!disconnected || millis() - disconnectedTime > 5000)
+    if (!disconnected || millis() - disconnectedTime > 15000)
     {
       for (int i = 0; i < LED_COUNT; i++)
       {
@@ -62,6 +62,7 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
         strip.show();
         delay(DELAYVAL);
       }
+      // flash();
     }
     disconnected = false;
 
@@ -158,7 +159,62 @@ void updateLeds()
       strip.setPixelColor(i, strip.Color(state.primary[0], state.primary[1], state.primary[2]));
     }
     break;
+  case 3:
+    // breathing (sine wave)
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(state.primary[0] * sin(animProgress * PI), state.primary[1] * sin(animProgress * PI), state.primary[2] * sin(animProgress * PI)));
+    }
+    break;
+  case 4:
+    // freaky breathing (sine wave between 255, 0, 136 and 255, 0, 0)
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(150 + 50 * sin(animProgress * PI), 0, 136 * sin(animProgress * PI)));
+    }
+  case 5:
+    // party - rainbow flashing
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, Wheel((int)(animProgress * 255 + colorOffset * i) % 255));
+    }
+    break;
+  case 6:
+    // switch between primary and secondary
+    if (animProgress < 0.5)
+    {
+      for (int i = 0; i < LED_COUNT; i++)
+      {
+        strip.setPixelColor(i, strip.Color(state.primary[0], state.primary[1], state.primary[2]));
+      }
+    }
+    else
+    {
+      for (int i = 0; i < LED_COUNT; i++)
+      {
+        strip.setPixelColor(i, strip.Color(state.secondary[0], state.secondary[1], state.secondary[2]));
+      }
+    }
+    break;
+  case 7:
+    // strobe - switch between primary and off
+    if (animProgress < 0.5)
+    {
+      for (int i = 0; i < LED_COUNT; i++)
+      {
+        strip.setPixelColor(i, strip.Color(state.primary[0], state.primary[1], state.primary[2]));
+      }
+    }
+    else
+    {
+      for (int i = 0; i < LED_COUNT; i++)
+      {
+        strip.setPixelColor(i, strip.Color(0, 0, 0));
+      }
+    }
+    break;
   }
+
   // lastUpdate = millis();
   strip.show();
 }
@@ -211,7 +267,7 @@ void setup()
 void loop()
 {
   webSocket.loop();
-  if (disconnected && millis() - disconnectedTime > 5000)
+  if (disconnected && millis() - disconnectedTime > 15000)
   {
     for (int i = 0; i < LED_COUNT; i++)
     {
