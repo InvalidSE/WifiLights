@@ -1,167 +1,227 @@
 #include <Arduino.h>
-
-#define LED_PIN     16
-#define COLOR_ORDER NEO_GRB
-#define LED_COUNT    19
-
 #include <Adafruit_NeoPixel.h>
+#include <WifiManager.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+
+#define LED_PIN 16
+#define COLOR_ORDER NEO_GRB
+#define LED_COUNT 19
+
+#define DELAYVAL 30
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, COLOR_ORDER + NEO_KHZ800);
+WebSocketsClient webSocket;
+JsonDocument doc;
+char *message;
 
-unsigned long pixelPrevious = 0;        // Previous Pixel Millis
-unsigned long patternPrevious = 0;      // Previous Pattern Millis
-int           patternCurrent = 0;       // Current Pattern Number
-int           patternInterval = 5000;   // Pattern Interval (ms)
-bool          patternComplete = false;
+// | Mode | Description                                     |
+// | ---- | ----------------------------------------------- |
+// | 0    | Default, Off                                    |
+// | 1    | Rainbow (Individual)                            |
+// | 2    | Solid colour (Primary)                          |
+// | 3    | Breathing (Primary, Seconary)                   |
+// | 4    | Freaky - Breathing (Red, Purple)                |
+// | 5    | Party - Rainbow flashing                        |
+// | 6    | Switch - Switches between Primary and Secondary |
+// | 7    | Strobe - Switches between Primary and Off       |
 
-int           pixelInterval = 50;       // Pixel Interval (ms)
-int           pixelQueue = 0;           // Pattern Pixel Queue
-int           pixelCycle = 0;           // Pattern Pixel Cycle
-uint16_t      pixelNumber = LED_COUNT;  // Total Number of Pixels
+struct State
+{
+  uint8_t primary[3] = {255, 255, 255};
+  uint8_t secondary[3] = {0, 0, 0};
+  uint8_t mode = 3;
+  uint8_t brightness = 50;
+  int speed = 1000;
+};
 
-void colorWipe(uint32_t color, int wait);
-void theaterChase(uint32_t color, int wait);
-void rainbow(uint8_t wait);
-void theaterChaseRainbow(uint8_t wait);
-uint32_t Wheel(byte WheelPos);
+int disconnectedTime;
+bool disconnected = false;
+bool fadeIn = true;
+State state;
+float animProgress;
+State previousState;
+int lastUpdate = 0; // millis
+int colorOffset = 10;
 
-void setup() {
-  strip.begin();
-  strip.show();
-  strip.setBrightness(50); 
-}
+void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
+{
 
-void loop() {
-  unsigned long currentMillis = millis();                     //  Update current time
-  if( patternComplete || (currentMillis - patternPrevious) >= patternInterval) {  //  Check for expired time
-    patternComplete = false;
-    patternPrevious = currentMillis;
-    patternCurrent++;                                         //  Advance to next pattern
-    if(patternCurrent >= 7)
-      patternCurrent = 0;
-  }
-
-  if(currentMillis - pixelPrevious >= pixelInterval) {        //  Check for expired time
-    pixelPrevious = currentMillis;                            //  Run current frame
-    switch (patternCurrent) {
-      case 7:
-        theaterChaseRainbow(50); // Rainbow-enhanced theaterChase variant
-        break;
-      case 6:
-        rainbow(10); // Flowing rainbow cycle along the whole strip
-        break;     
-      case 5:
-        theaterChase(strip.Color(0, 0, 127), 50); // Blue
-        break;
-      case 4:
-        theaterChase(strip.Color(127, 0, 0), 50); // Red
-        break;
-      case 3:
-        theaterChase(strip.Color(127, 127, 127), 50); // White
-        break;
-      case 2:
-        colorWipe(strip.Color(0, 0, 255), 50); // Blue
-        break;
-      case 1:
-        colorWipe(strip.Color(0, 255, 0), 50); // Green
-        break;        
-      default:
-        colorWipe(strip.Color(255, 0, 0), 50); // Red
-        break;
+  switch (type)
+  {
+  case WStype_DISCONNECTED:
+    disconnected = millis();
+    disconnected = true;
+    break;
+  case WStype_CONNECTED:
+    if (!disconnected || millis() - disconnectedTime > 5000)
+    {
+      for (int i = 0; i < LED_COUNT; i++)
+      {
+        strip.setPixelColor(i, strip.Color(255, 0, 255));
+        strip.show();
+        delay(DELAYVAL);
+      }
     }
+    disconnected = false;
+
+    webSocket.sendTXT("Connected");
+    break;
+  case WStype_TEXT:
+    // flash();
+    // Serial.println("Received: " + String((char *)payload)); // {"primary":[0,0,0],"secondary":[0,0,0],"mode":"2","brightness":100}
+    message = (char *)payload;
+
+    deserializeJson(doc, message);
+    state.primary[0] = doc["primary"][0];
+    state.primary[1] = doc["primary"][1];
+    state.primary[2] = doc["primary"][2];
+    state.secondary[0] = doc["secondary"][0];
+    state.secondary[1] = doc["secondary"][1];
+    state.secondary[2] = doc["secondary"][2];
+    state.mode = doc["mode"];
+    state.brightness = doc["brightness"];
+    state.speed = doc["speed"];
+
+    break;
+  default:
+    break;
   }
 }
 
-// Some functions of our own for creating animated effects -----------------
-
-// Fill strip pixels one after another with a color. Strip is NOT cleared
-// first; anything there will be covered pixel by pixel. Pass in color
-// (as a single 'packed' 32-bit value, which you can get by calling
-// strip.Color(red, green, blue) as shown in the loop() function above),
-// and a delay time (in milliseconds) between pixels.
-void colorWipe(uint32_t color, int wait) {
-  static uint16_t current_pixel = 0;
-  pixelInterval = wait;                        //  Update delay time
-  strip.setPixelColor(current_pixel++, color); //  Set pixel's color (in RAM)
-  strip.show();                                //  Update strip to match
-  if(current_pixel >= pixelNumber) {           //  Loop the pattern from the first LED
-    current_pixel = 0;
-    patternComplete = true;
-  }
-}
-
-// Theater-marquee-style chasing lights. Pass in a color (32-bit value,
-// a la strip.Color(r,g,b) as mentioned above), and a delay time (in ms)
-// between frames.
-void theaterChase(uint32_t color, int wait) {
-  static uint32_t loop_count = 0;
-  static uint16_t current_pixel = 0;
-
-  pixelInterval = wait;                   //  Update delay time
-
-  strip.clear();
-
-  for(int c=current_pixel; c < pixelNumber; c += 3) {
-    strip.setPixelColor(c, color);
-  }
-  strip.show();
-
-  current_pixel++;
-  if (current_pixel >= 3) {
-    current_pixel = 0;
-    loop_count++;
-  }
-
-  if (loop_count >= 10) {
-    current_pixel = 0;
-    loop_count = 0;
-    patternComplete = true;
-  }
-}
-
-// Rainbow cycle along whole strip. Pass delay time (in ms) between frames.
-void rainbow(uint8_t wait) {
-  if(pixelInterval != wait)
-    pixelInterval = wait;                   
-  for(uint16_t i=0; i < pixelNumber; i++) {
-    strip.setPixelColor(i, Wheel((i + pixelCycle) & 255)); //  Update delay time  
-  }
-  strip.show();                             //  Update strip to match
-  pixelCycle++;                             //  Advance current cycle
-  if(pixelCycle >= 256)
-    pixelCycle = 0;                         //  Loop the cycle back to the begining
-}
-
-//Theatre-style crawling lights with rainbow effect
-void theaterChaseRainbow(uint8_t wait) {
-  if(pixelInterval != wait)
-    pixelInterval = wait;                   //  Update delay time  
-  for(int i=0; i < pixelNumber; i+=3) {
-    strip.setPixelColor(i + pixelQueue, Wheel((i + pixelCycle) % 255)); //  Update delay time  
-  }
-  strip.show();
-  for(int i=0; i < pixelNumber; i+=3) {
-    strip.setPixelColor(i + pixelQueue, strip.Color(0, 0, 0)); //  Update delay time  
-  }      
-  pixelQueue++;                           //  Advance current queue  
-  pixelCycle++;                           //  Advance current cycle
-  if(pixelQueue >= 3)
-    pixelQueue = 0;                       //  Loop
-  if(pixelCycle >= 256)
-    pixelCycle = 0;                       //  Loop
-}
-
-// Input a value 0 to 255 to get a color value.
-// The colours are a transition r - g - b - back to r.
-uint32_t Wheel(byte WheelPos) {
+uint32_t Wheel(byte WheelPos)
+{
   WheelPos = 255 - WheelPos;
-  if(WheelPos < 85) {
+  if (WheelPos < 85)
+  {
     return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
   }
-  if(WheelPos < 170) {
+  if (WheelPos < 170)
+  {
     WheelPos -= 85;
     return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
   }
   WheelPos -= 170;
   return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
+
+void flash()
+{
+  for (int j = 0; j < 3; j++)
+  {
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(255, 255, 255));
+      strip.show();
+    }
+    delay(DELAYVAL);
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(0, 0, 0));
+      strip.show();
+    }
+    delay(DELAYVAL);
+  }
+}
+
+void updateLeds()
+{
+  if (state.mode != previousState.mode || state.primary[0] != previousState.primary[0] || state.primary[1] != previousState.primary[1] || state.primary[2] != previousState.primary[2] || state.secondary[0] != previousState.secondary[0] || state.secondary[1] != previousState.secondary[1] || state.secondary[2] != previousState.secondary[2] || state.brightness != previousState.brightness || state.speed != previousState.speed)
+  {
+    strip.setBrightness(state.brightness);
+    previousState = state;
+  }
+
+  animProgress = millis() % state.speed / (float)state.speed;
+  // Serial.println(animProgress);
+  switch (state.mode)
+  {
+  case 0:
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(0, 0, 0));
+    }
+    break;
+  case 1:
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      // 0 deg -> 255 0 0, 60 deg -> 255 255 0, 120 deg -> 0 255 0, 180 deg -> 0 255 255, 240 deg -> 0 0 255, 300 deg -> 255 0 255
+      // float angle = (animProgress * 360 + colorOffset * i) * PI / 180;
+      // strip.setPixelColor(i, strip.Color(255 * cos(angle), 255 * cos(angle + (2 * PI / 3)), 255 * cos(angle - (2 * PI / 3))));
+
+      strip.setPixelColor(i, Wheel((int)(animProgress * 255 + colorOffset * i) % 255));
+    }
+    break;
+  case 2:
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(state.primary[0], state.primary[1], state.primary[2]));
+    }
+    break;
+  }
+  // lastUpdate = millis();
+  strip.show();
+}
+
+void setup()
+{
+  Serial.begin(115200);
+
+  strip.begin();
+  strip.show();
+  strip.setBrightness(50);
+
+  for (int i = 0; i < LED_COUNT; i++)
+  {
+    strip.setPixelColor(i, strip.Color(0, 150, 0));
+    strip.show();
+    delay(DELAYVAL);
+  }
+
+  WiFiManager wm;
+  bool res;
+  res = wm.autoConnect("lights", "InvalidSE");
+
+  if (!res)
+  {
+    Serial.println("Failed to connect");
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(255, 0, 0));
+      strip.show();
+      delay(DELAYVAL);
+    }
+  }
+  else
+  {
+    Serial.println("Connected");
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(0, 0, 255));
+      strip.show();
+      delay(DELAYVAL);
+    }
+  }
+
+  webSocket.begin("invalidse-wifi-lights.host.qrl.nz", 80);
+  webSocket.onEvent(webSocketEvent);
+  webSocket.setReconnectInterval(5000);
+}
+
+void loop()
+{
+  webSocket.loop();
+  if (disconnected && millis() - disconnectedTime > 5000)
+  {
+    for (int i = 0; i < LED_COUNT; i++)
+    {
+      strip.setPixelColor(i, strip.Color(255, 0, 0));
+      strip.show();
+      delay(DELAYVAL);
+    }
+  }
+  else
+  {
+    updateLeds();
+  }
 }

@@ -1,0 +1,18 @@
+[37m*[37mwm:AutoConnect 
+[37m*[37mwm:No wifi saved, skipping 
+[37m*wm:[37mAutoConnect: FAILED for  [37m50 ms[37m
+[37m*[37mwm:StartAP with SSID:  [37m153[37m
+[37m*[37mwm:AP IP address: [37m192.[37m168[37m.4[37m.[37m1
+[37m*[37mwm:Starting Web Portal[37m [37m
+[37m*[37mwm:66 networks found
+[37m*[37mwm:Connecting to NEW AP: Wonky Cows
+[37m*[37mwm:connectTimeout not set, ESP waitForConnectResult... 
+[37m*[37mwm:[ERROR] Connect to new AP Failed 
+[37m*[37mwm:65 networks found[37m
+[37m*[37mwm:Connecting to NEW AP: Wonky Cows[37m
+[37m*[37mwm:connectTimeout not set, ESP waitForConnectResult...[37m 
+[37m*[37mwm:Connect to new AP [SUCCESS] [37m
+*wm:[37mGot IP Address: 
+[37m*wm:[37m192[37m.[37m168[37m.[37m1[37m.[37m2[37m08[37m [37m
+[37m*[37mwm:config portal exiting 
+Connected[37m
